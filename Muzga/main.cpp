@@ -14,6 +14,7 @@ struct
 	MSG msg;
 	BOOL gbool = true;
 
+
 	//определяет размер экрана в вашей сиситеме
 	int width = GetSystemMetrics(SM_CXSCREEN) - 200, height = GetSystemMetrics(SM_CYSCREEN) - 200;
 } window;
@@ -68,8 +69,8 @@ struct Player
 	std::vector<HBITMAP> WalkFrames;
 	std::vector<HBITMAP> ShootFrames;
 
-	int currentFrame = 0;
-	int frameTimer = 0;
+	int currentFrame = 10;
+	int frameTimer = 62;
 
 } player;
 
@@ -205,7 +206,7 @@ void EnemyGravity()
 	else
 	{
 		enemy.y = window.height - enemy.Height;
-		
+
 	}
 
 }
@@ -433,6 +434,7 @@ void ShowBitmap(HDC hDC, int x, int y, int x1, int y1, HBITMAP hBitmapBall, bool
 			RGB(255, 0, 222)
 		);
 
+
 		SelectObject(hFlipDC, hOldFlip);
 		DeleteObject(hFlipBitmap);
 		DeleteDC(hFlipDC);
@@ -440,6 +442,48 @@ void ShowBitmap(HDC hDC, int x, int y, int x1, int y1, HBITMAP hBitmapBall, bool
 
 	SelectObject(hMemDC, hOldbm);
 	DeleteDC(hMemDC);
+}
+
+HBITMAP CropBitmap(HBITMAP hSrcBitmap, int cropX, int cropY, int cropWidth, int cropHeight) {
+	// Получаем параметры исходного битмапа
+	BITMAP bm = {};
+	GetObject(hSrcBitmap, sizeof(BITMAP), &bm);
+
+	// Получаем контекст экрана по умолчанию
+	HDC hScreenDC = GetDC(NULL);
+
+	// Создаем контексты памяти для источника и назначения
+	HDC hSrcDC = CreateCompatibleDC(hScreenDC);
+	HDC hDstDC = CreateCompatibleDC(hScreenDC);
+
+	// Создаем новый пустой битмап для обрезанного изображения
+	HBITMAP hDstBitmap = CreateCompatibleBitmap(hScreenDC, cropWidth, cropHeight);
+
+	// Выбираем битмапы в контексты
+	HBITMAP hOldSrcBmp = (HBITMAP)SelectObject(hSrcDC, hSrcBitmap);
+	HBITMAP hOldDstBmp = (HBITMAP)SelectObject(hDstDC, hDstBitmap);
+
+	// Копируем нужный фрагмент
+	BitBlt(
+		hDstDC,        // Целевой DC
+		0, 0,          // Координаты X, Y вставки вцелом (верхний левый угол нового)
+		cropWidth,     // Ширина копируемой области
+		cropHeight,    // Высота копируемой области
+		hSrcDC,        // Исходный DC
+		cropX,         // Координата X источника, откуда режем
+		cropY,         // Координата Y источника, откуда режем
+		SRCCOPY        // Метод копирования
+	);
+
+	// Очистка и восстановление состояния
+	SelectObject(hSrcDC, hOldSrcBmp);
+	SelectObject(hDstDC, hOldDstBmp);
+
+	DeleteDC(hSrcDC);
+	DeleteDC(hDstDC);
+	ReleaseDC(NULL, hScreenDC);
+
+	return hDstBitmap; // Возвращает новый обрезанный HBITMAP (не забудьте удалить через DeleteObject)
 }
 
 //загрузка модулей приложения
@@ -520,6 +564,10 @@ void UpdateImage()
 	bool playerFlip = (player.facing == -1);
 	ShowBitmap(window.contx, player.PlayerX, player.PlayerY, player.PleyerWidth, player.PleyerHeight, currentPlayerBitmap, playerFlip);
 
+	HBITMAP tempH = CropBitmap((HBITMAP)LoadImageA(NULL, "coin.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE), player.currentFrame + player.frameTimer, 0, 62, 56);
+
+	ShowBitmap(window.contx, 100, 100, 62, 56, tempH);
+
 
 	// враг. рисуем только если жив
 	if (enemy.alive)
@@ -570,6 +618,11 @@ int CALLBACK WinMain(
 
 		//задержка обновления
 		Sleep(16);
+		player.frameTimer += 71;
+		if (player.frameTimer > 72 * 9)
+		{
+			player.frameTimer = 0;
+		}
 	}
 	return 0;
 }
