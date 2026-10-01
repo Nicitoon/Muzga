@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="Muzga/Muzga.vcxproj" />
+  <Project Path="Muzga/Muzga.vcxproj" Id="37d4265d-e638-4ab2-b011-0dbe2a000475" />
 </Solution>

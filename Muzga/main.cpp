@@ -32,18 +32,20 @@ struct Bullet
 	int width;
 	int height;
 	bool create = false;
+	int direction = 1;
 } bullet;
 std::vector<Block> blocks;
 struct Enemy
 {
 	int x = 500;
 	int y = 700;
-	int Height = 100;
-	int Width = 100;
+	int Height = 150;
+	int Width = 150;
 	int radius = 300;
 	bool collisionis = false;
 	int grav = 10;
 	int center;
+	bool alive = true;
 } enemy;
 
 struct Player
@@ -55,13 +57,19 @@ struct Player
 	int jumpis = 1;
 	int jumpPower = 0;
 	int grav = 10;
-	std::vector <HBITMAP> Images{
-		{(HBITMAP)LoadImageA(NULL, "back.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE)},
 
+	int facing = 1; // 1 = смотрит вправо, -1 = смотрит влево
 
+	bool isWalking = false;
+	bool isShooting = false;
+	int shootTimer = 0;
 
+	std::vector<HBITMAP> IdleFrames;
+	std::vector<HBITMAP> WalkFrames;
+	std::vector<HBITMAP> ShootFrames;
 
-	};
+	int currentFrame = 0;
+	int frameTimer = 0;
 
 } player;
 
@@ -124,6 +132,46 @@ void CheckPlayerCollisions()
 		}
 	}
 }
+void CheckEnemyCollisions()
+{
+	for (int i = 0; i < blocks.size(); i++)
+	{
+		if (CheckCollision(
+			enemy.x, enemy.y,
+			enemy.Width, enemy.Height,
+			blocks[i].x, blocks[i].y,
+			blocks[i].width, blocks[i].height))
+		{
+			int overlapLeft = (enemy.x + enemy.Width) - blocks[i].x;
+			int overlapRight = (blocks[i].x + blocks[i].width) - enemy.x;
+			int overlapTop = (enemy.y + enemy.Height) - blocks[i].y;
+			int overlapBottom = (blocks[i].y + blocks[i].height) - enemy.y;
+
+			int minX = min(overlapLeft, overlapRight);
+			int minY = min(overlapTop, overlapBottom);
+
+			if (minX < minY)
+			{
+				if (overlapLeft < overlapRight)
+					enemy.x = blocks[i].x - enemy.Width;
+				else
+					enemy.x = blocks[i].x + blocks[i].width;
+			}
+			else
+			{
+				if (overlapTop < overlapBottom)
+				{
+					enemy.y = blocks[i].y - enemy.Height;
+				}
+				else
+				{
+					enemy.y = blocks[i].y + blocks[i].height;
+				}
+			}
+		}
+	}
+}
+
 
 void EnemyAttention()
 {
@@ -187,23 +235,59 @@ void Gravity()
 
 
 }
+void CheckBulletCollisions()
+{
+	if (!bullet.create)
+		return;
+
+	// с блоками
+	for (int i = 0; i < blocks.size(); i++)
+	{
+		if (CheckCollision(
+			bullet.x, bullet.y, 100, 100,
+			blocks[i].x, blocks[i].y,
+			blocks[i].width, blocks[i].height))
+		{
+			bullet.create = false;
+			return;
+		}
+	}
+
+	// с врагом
+	if (enemy.alive && CheckCollision(
+		bullet.x, bullet.y, 100, 100,
+		enemy.x, enemy.y,
+		enemy.Width, enemy.Height))
+	{
+		enemy.alive = false;
+		bullet.create = false;
+	}
+}
 void BulletMovement()
 {
 	if (bullet.create)
 	{
-		bullet.x += 30;
+		bullet.x += 30 * bullet.direction;
+
+		if (bullet.x > window.width || bullet.x < -100)
+		{
+			bullet.create = false;
+		}
 	}
 }
+
 
 void PlayerMovement()
 {
 	if (GetAsyncKeyState('A'))
 	{
 		player.PlayerX -= 10;
+		player.facing = -1;
 	}
 	if (GetAsyncKeyState('D'))
 	{
 		player.PlayerX += 10;
+		player.facing = 1;
 	}
 	if (GetAsyncKeyState(VK_SPACE))
 	{
@@ -222,11 +306,19 @@ void PlayerMovement()
 	}
 	if (GetAsyncKeyState('F'))
 	{
+		if (!bullet.create)
+		{
+			bullet.direction = player.facing;
 
-		bullet.x = player.PlayerX;
-		bullet.y = player.PlayerY + player.PleyerHeight / 2;
-		bullet.create = true;
-		
+			if (player.facing == 1)
+				bullet.x = player.PlayerX + player.PleyerWidth; // вылетает справа
+			else
+				bullet.x = player.PlayerX - 100; // вылетает слева 
+
+			bullet.y = player.PlayerY + player.PleyerHeight / 4;
+			bullet.create = true;
+			player.shootTimer = 10;
+		}
 	}
 }
 
@@ -299,21 +391,52 @@ void InitWindow()
 }
 
 //отрисовка изображений .bmp
-void ShowBitmap(HDC hDC, int x, int y, int x1, int y1, HBITMAP hBitmapBall)
+void ShowBitmap(HDC hDC, int x, int y, int x1, int y1, HBITMAP hBitmapBall, bool flip = false)
 {
 	HDC hMemDC = CreateCompatibleDC(hDC);
 	HBITMAP hOldbm = (HBITMAP)SelectObject(hMemDC, hBitmapBall);
 
 	BITMAP bm;
-	GetObject(hBitmapBall, sizeof(BITMAP), &bm); // ← вот это и было пропущено
+	GetObject(hBitmapBall, sizeof(BITMAP), &bm);
 
-	TransparentBlt(
-		window.contx,
-		x, y, x1, y1,
-		hMemDC,
-		0, 0, bm.bmWidth, bm.bmHeight,
-		RGB(255, 0, 222)
-	);
+	if (!flip)
+	{
+		TransparentBlt(
+			window.contx,
+			x, y, x1, y1,
+			hMemDC,
+			0, 0, bm.bmWidth, bm.bmHeight,
+			RGB(255, 0, 222)
+		);
+	}
+	else
+	{
+		// создаём временный DC и рисуем в него зеркально отражённую копию
+		HDC hFlipDC = CreateCompatibleDC(hDC);
+		HBITMAP hFlipBitmap = CreateCompatibleBitmap(hDC, bm.bmWidth, bm.bmHeight);
+		HBITMAP hOldFlip = (HBITMAP)SelectObject(hFlipDC, hFlipBitmap);
+
+		// StretchBlt поддерживает отрицательную ширину ИСТОЧНИКА — так и зеркалим
+		StretchBlt(
+			hFlipDC,
+			0, 0, bm.bmWidth, bm.bmHeight,
+			hMemDC,
+			bm.bmWidth - 1, 0, -bm.bmWidth, bm.bmHeight,
+			SRCCOPY
+		);
+
+		TransparentBlt(
+			window.contx,
+			x, y, x1, y1,
+			hFlipDC,
+			0, 0, bm.bmWidth, bm.bmHeight,
+			RGB(255, 0, 222)
+		);
+
+		SelectObject(hFlipDC, hOldFlip);
+		DeleteObject(hFlipBitmap);
+		DeleteDC(hFlipDC);
+	}
 
 	SelectObject(hMemDC, hOldbm);
 	DeleteDC(hMemDC);
@@ -330,7 +453,12 @@ void InitApp()
 	blocks.push_back({ 1100, 550, 100, 100 });
 	blocks.push_back({ 700, 750, 100, 100 });
 	blocks.push_back({ 500, 850, 150, 50 });
+
+	player.IdleFrames.push_back((HBITMAP)LoadImageA(NULL, "Player.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
+	player.WalkFrames.push_back((HBITMAP)LoadImageA(NULL, "PlayerWalk.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
+	player.ShootFrames.push_back((HBITMAP)LoadImageA(NULL, "PlayerShoot.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
 }
+
 
 //обновление приложения
 void UpdateApp()
@@ -340,8 +468,9 @@ void UpdateApp()
 	CheckPlayerCollisions();
 	EnemyAttention();
 	EnemyGravity();
+	CheckEnemyCollisions();
 	BulletMovement();
-
+	CheckBulletCollisions();
 
 
 
@@ -364,8 +493,11 @@ void UpdateKeyCode()
 void UpdateImage()
 {
 	BitBlt(window.dev_cont, 0, 0, window.width, window.height, window.contx, 0, 0, SRCCOPY);
-	//отрисовка заднего фона
+
+	// заднике
 	ShowBitmap(window.contx, 0, 0, window.width, window.height, (HBITMAP)LoadImageA(NULL, "back.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
+
+	// блоки
 	for (int i = 0; i < blocks.size(); i++)
 	{
 		ShowBitmap(window.contx,
@@ -373,14 +505,37 @@ void UpdateImage()
 			blocks[i].width, blocks[i].height,
 			(HBITMAP)LoadImageA(NULL, "block.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
 	}
-	ShowBitmap(window.contx, player.PlayerX, player.PlayerY, player.PleyerWidth, player.PleyerHeight, (HBITMAP)LoadImageA(NULL, "Player.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
-	ShowBitmap(window.contx, enemy.x, enemy.y, enemy.Width, enemy.Height, (HBITMAP)LoadImageA(NULL, "enemy.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
+
+	// выбор кадра игрока по текущему состоянию
+	HBITMAP currentPlayerBitmap;
+
+	if (player.isShooting)
+		currentPlayerBitmap = player.ShootFrames[0];
+	else if (player.isWalking)
+		currentPlayerBitmap = player.WalkFrames[0];
+	else
+		currentPlayerBitmap = player.IdleFrames[0];
+
+	// отрисовка игрока
+	bool playerFlip = (player.facing == -1);
+	ShowBitmap(window.contx, player.PlayerX, player.PlayerY, player.PleyerWidth, player.PleyerHeight, currentPlayerBitmap, playerFlip);
+
+
+	// враг. рисуем только если жив
+	if (enemy.alive)
+	{
+		ShowBitmap(window.contx, enemy.x, enemy.y, enemy.Width, enemy.Height, (HBITMAP)LoadImageA(NULL, "Enemy.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
+	}
+
+	// пуля
 	if (bullet.create)
 	{
-		ShowBitmap(window.contx, bullet.x, bullet.y, 100, 100, (HBITMAP)LoadImageA(NULL, "bullet.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
-
+		bool bulletFlip = (bullet.direction == -1);
+		ShowBitmap(window.contx, bullet.x, bullet.y, 100, 100, (HBITMAP)LoadImageA(NULL, "bullet.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE), bulletFlip);
 	}
+
 }
+
 
 //вход в программу
 int CALLBACK WinMain(
