@@ -1,628 +1,469 @@
-﻿#include "Windows.h"
+﻿//linker::system::subsystem  - Windows(/ SUBSYSTEM:WINDOWS)
+//configuration::advanced::character set - not set
+//linker::input::additional dependensies Msimg32.lib; Winmm.lib
+#include "windows.h"
 #include "vector"
-#pragma comment(lib, "msimg32.lib")
-#include "math.h"
+#include "string"
+#pragma comment(lib, "Msimg32.lib") 
 
-//стурктура где храняться данные о windows окне
-struct
-{
-	//дескрипторы, контейнеры и буфферы для windows
-	RECT rc;
-	HINSTANCE hIns;
-	HWND hWnd;
-	HDC dev_cont, contx;
-	MSG msg;
-	BOOL gbool = true;
+// секция данных игры
+struct sprite {
+    float x, y, width, height, rad, dx, dy, speed;
+    bool iscreate = false;
+    HBITMAP hBitmap;//хэндл к спрайту шарика
+};
 
+sprite racket;//ракетка игрока
+sprite enemy;//ракетка противника
+sprite ball;//шарик
+#define raw 2
+#define colomn 10
+sprite block[colomn][raw];
 
-	//определяет размер экрана в вашей сиситеме
-	int width = GetSystemMetrics(SM_CXSCREEN) - 200, height = GetSystemMetrics(SM_CYSCREEN) - 200;
+struct {
+    int score, balls;//количество набранных очков и оставшихся "жизней"
+    bool action = false;//состояние - ожидание (игрок должен нажать пробел) или игра
+} game;
+
+struct {
+    HWND hWnd;//хэндл окна
+    HDC device_context, context;// два контекста устройства (для буферизации)
+    int width, height;//сюда сохраним размеры окна которое создаст программа
 } window;
 
-struct Block
+HBITMAP hBack;// хэндл для фонового изображения
+
+//cекция кода
+bool CheckCollision(
+    float x1, float y1, float w1, float h1,
+    float x2, float y2, float w2, float h2)
 {
-	int x;
-	int y;
-	int width;
-	int height;
-};
-struct Bullet
-{
-	int x;
-	int y;
-	int width;
-	int height;
-	bool create = false;
-	int direction = 1;
-} bullet;
-std::vector<Block> blocks;
-struct Enemy
-{
-	int x = 500;
-	int y = 700;
-	int Height = 150;
-	int Width = 150;
-	int radius = 300;
-	bool collisionis = false;
-	int grav = 10;
-	int center;
-	bool alive = true;
-} enemy;
-
-struct Player
-{
-	int PlayerX = 0;
-	int PlayerY = 0;
-	int PleyerHeight = 195;
-	int PleyerWidth = 131;
-	int jumpis = 1;
-	int jumpPower = 0;
-	int grav = 10;
-
-	int facing = 1; // 1 = смотрит вправо, -1 = смотрит влево
-
-	bool isWalking = false;
-	bool isShooting = false;
-	int shootTimer = 0;
-
-	std::vector<HBITMAP> IdleFrames;
-	std::vector<HBITMAP> WalkFrames;
-	std::vector<HBITMAP> ShootFrames;
-
-	int currentFrame = 10;
-	int frameTimer = 62;
-
-} player;
-
-bool CheckCollision(int x1, int y1, int w1, int h1, int x2, int y2, int w2, int h2)
-{
-	return
-		x1      < x2 + w2 &&
-		x1 + w1 > x2 &&
-		y1      < y2 + h2 &&
-		y1 + h1 > y2;
-}
-bool CheckCollisionEnemy(int x1, int y1, int w1, int h1, int x2, int y2, int rad)
-{
-	return
-		x1      < x2 + rad &&
-		x1 + w1 > x2 - rad &&
-		y1      < y2 + rad &&
-		y1 + h1 > y2 - rad;
+    return
+        x1      < x2 + w2 &&
+        x1 + w1 > x2 &&
+        y1      < y2 + h2 &&
+        y1 + h1 > y2;
 }
 
-void CheckPlayerCollisions()
+std::vector<POINT> TraceLine(int x0, int y0, int x1, int y1)
 {
-	for (int i = 0; i < blocks.size(); i++)
-	{
-		if (CheckCollision(
-			player.PlayerX, player.PlayerY,
-			player.PleyerWidth, player.PleyerHeight,
-			blocks[i].x, blocks[i].y,
-			blocks[i].width, blocks[i].height))
-		{
-			int overlapLeft = (player.PlayerX + player.PleyerWidth) - blocks[i].x;
-			int overlapRight = (blocks[i].x + blocks[i].width) - player.PlayerX;
-			int overlapTop = (player.PlayerY + player.PleyerHeight) - blocks[i].y;
-			int overlapBottom = (blocks[i].y + blocks[i].height) - player.PlayerY;
+    std::vector<POINT> points;
 
-			int minX = min(overlapLeft, overlapRight);
-			int minY = min(overlapTop, overlapBottom);
+    int dx = (x1 >= x0) ? (x1 - x0) : (x0 - x1);
+    int dy = -((y1 >= y0) ? (y1 - y0) : (y0 - y1));
 
-			if (minX < minY)
-			{
-				if (overlapLeft < overlapRight)
-					player.PlayerX = blocks[i].x - player.PleyerWidth;
-				else
-					player.PlayerX = blocks[i].x + blocks[i].width;
-			}
-			else
-			{
-				if (overlapTop < overlapBottom)
-				{
-					player.PlayerY = blocks[i].y - player.PleyerHeight;
-					player.jumpis = 0;
-					player.jumpPower = 0;
-				}
-				else
-				{
-					player.PlayerY = blocks[i].y + blocks[i].height;
-					player.jumpPower = 0;
-				}
-			}
-		}
-	}
-}
-void CheckEnemyCollisions()
-{
-	for (int i = 0; i < blocks.size(); i++)
-	{
-		if (CheckCollision(
-			enemy.x, enemy.y,
-			enemy.Width, enemy.Height,
-			blocks[i].x, blocks[i].y,
-			blocks[i].width, blocks[i].height))
-		{
-			int overlapLeft = (enemy.x + enemy.Width) - blocks[i].x;
-			int overlapRight = (blocks[i].x + blocks[i].width) - enemy.x;
-			int overlapTop = (enemy.y + enemy.Height) - blocks[i].y;
-			int overlapBottom = (blocks[i].y + blocks[i].height) - enemy.y;
+    int sx = (x0 < x1) ? 1 : -1;
+    int sy = (y0 < y1) ? 1 : -1;
 
-			int minX = min(overlapLeft, overlapRight);
-			int minY = min(overlapTop, overlapBottom);
+    int err = dx + dy;
 
-			if (minX < minY)
-			{
-				if (overlapLeft < overlapRight)
-					enemy.x = blocks[i].x - enemy.Width;
-				else
-					enemy.x = blocks[i].x + blocks[i].width;
-			}
-			else
-			{
-				if (overlapTop < overlapBottom)
-				{
-					enemy.y = blocks[i].y - enemy.Height;
-				}
-				else
-				{
-					enemy.y = blocks[i].y + blocks[i].height;
-				}
-			}
-		}
-	}
+    int x = x0;
+    int y = y0;
+
+    while (true)
+    {
+        SetPixel(window.context, x, y, RGB(255,255,255));
+        points.push_back({ x, y });
+
+        if (x == x1 && y == y1)
+        {
+            break;
+        }
+
+        int e2 = 2 * err;
+
+        if (e2 >= dy)
+        {
+            err += dy;
+            x += sx;
+        }
+
+        if (e2 <= dx)
+        {
+            err += dx;
+            y += sy;
+        }
+    }
+
+    return points;
 }
 
-
-void EnemyAttention()
+void InitGame()
 {
-	enemy.center = enemy.x + enemy.Width / 2;
-	if (CheckCollisionEnemy(
-		player.PlayerX, player.PlayerY,
-		player.PleyerWidth, player.PleyerHeight,
-		enemy.center, enemy.y,
-		enemy.radius))
-	{
-		if (player.PlayerX < enemy.x)
-		{
-			enemy.x -= 5;
-		}
-		else
-		{
-			enemy.x += 5;
-		}
+    //в этой секции загружаем спрайты с помощью функций gdi
+    //пути относительные - файлы должны лежать рядом с .exe
+    //результат работы LoadImageA сохраняет в хэндлах битмапов, рисование спрайтов будет произовдиться с помощью этих хэндлов
+    ball.hBitmap = (HBITMAP)LoadImageA(NULL, "ball.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+    racket.hBitmap = (HBITMAP)LoadImageA(NULL, "racket.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+    hBack = (HBITMAP)LoadImageA(NULL, "back.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
 
-	}
+    for (int i = 0; i < colomn; i++)
+    {
+        for (int b = 0; b < raw; b++)
+        {
+            block[i][b].iscreate = true;
+            block[i][b].width = window.width / colomn;
+            block[i][b].height = 100;
 
+            block[i][b].x = 0 + (i * block[i][b].width);
+            block[i][b].y = 300 + (b * block[i][b].height);
+        }
+    }
+    //------------------------------------------------------
+
+    racket.width = 300;
+    racket.height = 50;
+    racket.speed = 30;//скорость перемещения ракетки
+    racket.x = window.width / 2.;//ракетка посередине окна
+    racket.y = window.height - racket.height;//чуть выше низа экрана - на высоту ракетки
+
+    ball.dy = (rand() % 65 + 35) / 100.;//формируем вектор полета шарика
+    ball.dx = -(1 - ball.dy);//формируем вектор полета шарика
+    ball.speed = 11;
+    ball.rad = 20;
+    ball.x = racket.x;//x координата шарика - на середие ракетки
+    ball.y = racket.y - ball.rad;//шарик лежит сверху ракетки
+
+    game.score = 0;
+    game.balls = 9;
 }
-void EnemyGravity()
+void Paint_line(
+    float start_x, float start_y,
+    float iterator,
+    float X_pixel2, float Y_pixel2,
+    int R, int G, int B)
 {
+    float dx = abs(start_x - X_pixel2);
+    float dy = abs(start_y - Y_pixel2);
+    float C;
+    C = sqrt(pow(dx, 2) + pow(dy, 2));
 
-	if (enemy.y + enemy.Height < window.height)
-	{
-		enemy.y += enemy.grav;
-
-	}
-	else
-	{
-		enemy.y = window.height - enemy.Height;
-
-	}
-
+    SetPixel(window.context, iterator * dx / C + start_x, iterator * dy / C + start_y, RGB(R, G, B));
 }
 
-
-void Gravity()
+bool CheckBlockCollisionAt(float bx, float by)
 {
+    float ballLeft = bx - ball.rad;
+    float ballRight = bx + ball.rad;
+    float ballTop = by - ball.rad;
+    float ballBottom = by + ball.rad;
 
-	if (player.PlayerY + player.PleyerHeight < window.height)
-	{
-		player.PlayerY += player.grav;
+    for (int i = 0; i < colomn; i++)
+    {
+        for (int b = 0; b < raw; b++)
+        {
+            if (!block[i][b].iscreate)
+            {
+                continue;
+            }
+            if (CheckCollision(
+                ballLeft,
+                ballTop,
+                2.0f * ball.rad,
+                2.0f * ball.rad,
+                block[i][b].x,
+                block[i][b].y,
+                block[i][b].width,
+                block[i][b].height))
+            {
+                float blockLeft = block[i][b].x;
+                float blockRight =
+                    block[i][b].x + block[i][b].width;
 
-	}
-	else
-	{
-		player.PlayerY = window.height - player.PleyerHeight;
-		player.jumpis = 0;
-	}
-	if (player.jumpPower > 0)
-	{
-		player.grav = 0;
-	}
-	else
-	{
-		player.grav = 10;
-	}
+                float blockTop = block[i][b].y;
+                float blockBottom =
+                    block[i][b].y + block[i][b].height;
 
+                float overlapLeft = ballRight - blockLeft;
+                float overlapRight = blockRight - ballLeft;
+                float overlapTop = ballBottom - blockTop;
+                float overlapBottom = blockBottom - ballTop;
 
+                float minX = min(overlapLeft, overlapRight);
+                float minY = min(overlapTop, overlapBottom);
+
+                block[i][b].iscreate = false;
+
+                if (minX < minY)
+                {
+                    ball.dx *= -1;
+                }
+                else
+                {
+                    ball.dy *= -1;
+                }
+
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
-void CheckBulletCollisions()
+
+void ProcessSound(const char* name)//проигрывание аудиофайла в формате .wav, файл должен лежать в той же папке где и программа
 {
-	if (!bullet.create)
-		return;
-
-	// с блоками
-	for (int i = 0; i < blocks.size(); i++)
-	{
-		if (CheckCollision(
-			bullet.x, bullet.y, 100, 100,
-			blocks[i].x, blocks[i].y,
-			blocks[i].width, blocks[i].height))
-		{
-			bullet.create = false;
-			return;
-		}
-	}
-
-	// с врагом
-	if (enemy.alive && CheckCollision(
-		bullet.x, bullet.y, 100, 100,
-		enemy.x, enemy.y,
-		enemy.Width, enemy.Height))
-	{
-		enemy.alive = false;
-		bullet.create = false;
-	}
+    //PlaySound(TEXT(name), NULL, SND_FILENAME | SND_ASYNC);//переменная name содежрит имя файла. флаг ASYNC позволяет проигрывать звук паралельно с исполнением программы
 }
-void BulletMovement()
-{
-	if (bullet.create)
-	{
-		bullet.x += 30 * bullet.direction;
 
-		if (bullet.x > window.width || bullet.x < -100)
-		{
-			bullet.create = false;
-		}
-	}
+void ShowScore()
+{
+    //поиграем шрифтами и цветами
+    SetTextColor(window.context, RGB(160, 160, 160));
+    SetBkColor(window.context, RGB(0, 0, 0));
+    SetBkMode(window.context, TRANSPARENT);
+    auto hFont = CreateFont(70, 0, 0, 0, FW_BOLD, 0, 0, 0, 0, 0, 0, 2, 0, "CALIBRI");
+    auto hTmp = (HFONT)SelectObject(window.context, hFont);
+
+    char txt[32];//буфер для текста
+    _itoa_s(game.score, txt, 10);//преобразование числовой переменной в текст. текст окажется в переменной txt
+    TextOutA(window.context, 10, 10, "Score", 5);
+    TextOutA(window.context, 200, 10, (LPCSTR)txt, strlen(txt));
+
+    _itoa_s(game.balls, txt, 10);
+    TextOutA(window.context, 10, 100, "Balls", 5);
+    TextOutA(window.context, 200, 100, (LPCSTR)txt, strlen(txt));
+}
+
+void ProcessInput()
+{
+    if (GetAsyncKeyState(VK_LEFT)) racket.x -= racket.speed;
+    if (GetAsyncKeyState(VK_RIGHT)) racket.x += racket.speed;
+
+    if (!game.action && GetAsyncKeyState(VK_SPACE))
+    {
+        game.action = true;
+        ProcessSound("bounce.wav");
+    }
+}
+
+void ShowBitmap(HDC hDC, int x, int y, int x1, int y1, HBITMAP hBitmapBall, bool alpha = false)
+{
+    HBITMAP hbm, hOldbm;
+    HDC hMemDC;
+    BITMAP bm;
+
+    hMemDC = CreateCompatibleDC(hDC); // Создаем контекст памяти, совместимый с контекстом отображения
+    hOldbm = (HBITMAP)SelectObject(hMemDC, hBitmapBall);// Выбираем изображение bitmap в контекст памяти
+
+    if (hOldbm) // Если не было ошибок, продолжаем работу
+    {
+        GetObject(hBitmapBall, sizeof(BITMAP), (LPSTR)&bm); // Определяем размеры изображения
+
+        if (alpha)
+        {
+            TransparentBlt(window.context, x, y, x1, y1, hMemDC, 0, 0, x1, y1, RGB(0, 0, 0));//все пиксели черного цвета будут интепретированы как прозрачные
+        }
+        else
+        {
+            StretchBlt(hDC, x, y, x1, y1, hMemDC, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY); // Рисуем изображение bitmap
+        }
+
+        SelectObject(hMemDC, hOldbm);// Восстанавливаем контекст памяти
+    }
+
+    DeleteDC(hMemDC); // Удаляем контекст памяти
 }
 
 
-void PlayerMovement()
+void WordWrite(std::string* word)
 {
-	if (GetAsyncKeyState('A'))
-	{
-		player.PlayerX -= 10;
-		player.facing = -1;
-	}
-	if (GetAsyncKeyState('D'))
-	{
-		player.PlayerX += 10;
-		player.facing = 1;
-	}
-	if (GetAsyncKeyState(VK_SPACE))
-	{
-		if (player.jumpis == 0)
-		{
-			player.jumpPower += 40;
-			player.jumpis = 1;
-		}
-
-
-	}
-	if (player.jumpPower > 0)
-	{
-		player.PlayerY -= 23;
-		player.jumpPower -= 6;
-	}
-	if (GetAsyncKeyState('F'))
-	{
-		if (!bullet.create)
-		{
-			bullet.direction = player.facing;
-
-			if (player.facing == 1)
-				bullet.x = player.PlayerX + player.PleyerWidth; // вылетает справа
-			else
-				bullet.x = player.PlayerX - 100; // вылетает слева 
-
-			bullet.y = player.PlayerY + player.PleyerHeight / 4;
-			bullet.create = true;
-			player.shootTimer = 10;
-		}
-	}
+    *word += " !";
 }
 
 
-
-
-//обработка потока сообщений
-static LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+void ShowRacketAndBall()
 {
+    ShowBitmap(window.context, 0, 0, window.width, window.height, hBack);//задний фон
+    ShowBitmap(window.context, racket.x - racket.width / 2., racket.y, racket.width, racket.height, racket.hBitmap);// ракетка игрока
+    for (int i = 0; i < colomn; i++)
+    {
+        for (size_t b = 0; b < raw; b++)
+        {
+            if (block[i][b].iscreate)
+            {
+                ShowBitmap(window.context, block[i][b].x, block[i][b].y, 200, 100, (HBITMAP)LoadImageA(NULL, "block.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
+            }
+        }
+    }
 
-	switch (msg)
-	{
-	case WM_CLOSE:
-		PostQuitMessage(0);
-		break;
-	case WM_PAINT:
-	{
-		PAINTSTRUCT ps;
-		HDC hdc = BeginPaint(hWnd, &ps);
-		// Убрали весь код отсюда - рисование идёт через UpdateImage
-		EndPaint(hWnd, &ps);
-		return 0;
-	}
-	default:
-		return DefWindowProc(hWnd, msg, wParam, lParam);
-	}
-};
+    ShowBitmap(window.context, ball.x - ball.rad, ball.y - ball.rad, 2 * ball.rad, 2 * ball.rad, ball.hBitmap, true);// шарик
+    //float bx = ball.x;
+    //float by = ball.y;
+    //float X = ball.dx * ball.speed;
+    //float Y = ball.dy * ball.speed;
+    ///*for (int i = 1; i < 1000; i++)
+    //{
+    //    Paint_line(500, 500, i, 500, 0, 255,255,255);
+    //}*/
 
-//создания windows окна
+    std::string word = "hello";
+
+
+    TraceLine(500, 500, 1920-100, 1080);
+
+}
+
+void LimitRacket()
+{
+    racket.x = max(racket.x, racket.width / 2.);//если коодината левого угла ракетки меньше нуля, присвоим ей ноль
+    racket.x = min(racket.x, window.width - racket.width / 2.);//аналогично для правого угла
+}
+
+void CheckWalls()
+{
+    if (ball.x < ball.rad || ball.x > window.width - ball.rad)
+    {
+        ball.dx *= -1;
+        ProcessSound("bounce.wav");
+    }
+}
+
+void CheckRoof()
+{
+    if (ball.y < ball.rad)
+    {
+        ball.dy *= -1;
+        ProcessSound("bounce.wav");
+    }
+}
+
+bool tail = false;
+
+void CheckFloor()
+{
+    if (ball.y > window.height - ball.rad - racket.height)//шарик пересек линию отскока - горизонталь ракетки
+    {
+        if (!tail && ball.x >= racket.x - racket.width / 2. - ball.rad && ball.x <= racket.x + racket.width / 2. + ball.rad)//шарик отбит, и мы не в режиме обработки хвоста
+        {
+            game.score++;//за каждое отбитие даем одно очко
+            ball.speed += 5. / game.score;//но увеличиваем сложность - прибавляем скорости шарику
+            ball.dy *= -1;//отскок
+            racket.width -= 10. / game.score;//дополнительно уменьшаем ширину ракетки - для сложности
+            ProcessSound("bounce.wav");//играем звук отскока
+
+            racket.speed -= 10 / game.score;
+
+            if (game.score == 5) {
+                racket.width -= 5.;
+            }
+            if (game.score == 10) {
+                racket.width -= 5.;
+            }
+            if (game.score == 15) {
+                racket.width -= 5.;
+            }
+            if (game.score == 20) {
+                racket.width -= 5.;
+            }
+            if (game.score == 25) {
+                racket.width -= 5.;
+            }
+            if (game.score == 30) {
+                racket.width -= 5.;
+            }
+            if (game.score == 35) {
+                racket.width -= 5.;
+            }
+        }
+        else
+        {//шарик не отбит
+            tail = true;//дадим шарику упасть ниже ракетки
+
+            if (ball.y - ball.rad > window.height)//если шарик ушел за пределы окна
+            {
+                game.balls--;//уменьшаем количество "жизней"
+
+                ProcessSound("fail.wav");//играем звук
+
+                if (game.balls < 0) { //проверка условия окончания "жизней"
+                    MessageBoxA(window.hWnd, "game over", "", MB_OK);//выводим сообщение о проигрыше
+                    InitGame();//переинициализируем игру
+                }
+
+                ball.dy = (rand() % 65 + 35) / 100.;//задаем новый случайный вектор для шарика
+                ball.dx = -(1 - ball.dy);
+                ball.x = racket.x;//инициализируем координаты шарика - ставим его на ракетку
+                ball.y = racket.y - ball.rad;
+                game.action = false;//приостанавливаем игру, пока игрок не нажмет пробел
+                tail = false;
+            }
+        }
+    }
+}
+
+void ProcessRoom()
+{
+    //обрабатываем стены, потолок и пол. принцип - угол падения равен углу отражения, а значит, для отскока мы можем просто инвертировать часть вектора движения шарика
+    CheckWalls();
+    CheckRoof();
+    CheckFloor();
+}
+
+void ProcessBall()
+{
+    if (!game.action)
+    {
+        ball.x = racket.x;
+        return;
+    }
+
+    int x0 = (int)ball.x;
+    int y0 = (int)ball.y;
+
+    int x1 = (int)(ball.x + ball.dx * ball.speed);
+    int y1 = (int)(ball.y + ball.dy * ball.speed);
+
+    std::vector<POINT> path = TraceLine(x0, y0, x1, y1);
+
+    for (size_t i = 1; i < path.size(); i++)
+    {
+        ball.x = (float)path[i].x;
+        ball.y = (float)path[i].y;
+        if (CheckBlockCollisionAt(ball.x, ball.y))
+        {
+            break;
+        }
+    }
+}
+
 void InitWindow()
 {
-	//имя класса окна
-	const char* NameClass = "Window";
+    SetProcessDPIAware();
+    window.hWnd = CreateWindow("edit", 0, WS_POPUP | WS_VISIBLE | WS_MAXIMIZE, 0, 0, 0, 0, 0, 0, 0, 0);
 
-	//размер окна
-	window.rc = { 0,0,window.width,window.height
-	};
-
-	//учет размера
-	AdjustWindowRect(&window.rc, WS_CAPTION | WS_MINIMIZEBOX | WS_SYSMENU, FALSE);
-
-	//дескриптор класса окна
-	WNDCLASSEX wc = { 0 };
-	wc.cbSize = sizeof(wc);
-	wc.lpszClassName = NameClass;
-	wc.hInstance = window.hIns;
-	wc.lpfnWndProc = &WindowProc;
-
-	//регистрация класса окна
-	auto NameClassId = RegisterClassEx(&wc);
-
-	//деструктор окна
-	window.hWnd = CreateWindowEx(
-		NULL,
-		MAKEINTATOM(NameClassId),
-		"practicum5",
-		WS_CAPTION | WS_MINIMIZEBOX | WS_SYSMENU,
-		CW_USEDEFAULT,
-		CW_USEDEFAULT,
-		window.rc.right - window.rc.left,
-		window.rc.bottom - window.rc.top,
-		NULL,
-		NULL,
-		window.hIns,
-		NULL
-	);
-
-	//показ окна
-	ShowWindow(window.hWnd, SW_SHOW);
+    RECT r;
+    GetClientRect(window.hWnd, &r);
+    window.device_context = GetDC(window.hWnd);//из хэндла окна достаем хэндл контекста устройства для рисования
+    window.width = r.right - r.left;//определяем размеры и сохраняем
+    window.height = r.bottom - r.top;
+    window.context = CreateCompatibleDC(window.device_context);//второй буфер
+    SelectObject(window.context, CreateCompatibleBitmap(window.device_context, window.width, window.height));//привязываем окно к контексту
+    GetClientRect(window.hWnd, &r);
 }
 
-//отрисовка изображений .bmp
-void ShowBitmap(HDC hDC, int x, int y, int x1, int y1, HBITMAP hBitmapBall, bool flip = false)
+int APIENTRY wWinMain(
+    _In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE hPrevInstance,
+    _In_ LPWSTR lpCmdLine,
+    _In_ int nCmdShow)
 {
-	HDC hMemDC = CreateCompatibleDC(hDC);
-	HBITMAP hOldbm = (HBITMAP)SelectObject(hMemDC, hBitmapBall);
+    InitWindow();//здесь инициализируем все что нужно для рисования в окне
+    InitGame();//здесь инициализируем переменные игры
 
-	BITMAP bm;
-	GetObject(hBitmapBall, sizeof(BITMAP), &bm);
+    //mciSendString(TEXT("play ..\\Debug\\music.mp3 repeat"), NULL, 0, NULL);
+    ShowCursor(NULL);
 
-	if (!flip)
-	{
-		TransparentBlt(
-			window.contx,
-			x, y, x1, y1,
-			hMemDC,
-			0, 0, bm.bmWidth, bm.bmHeight,
-			RGB(255, 0, 222)
-		);
-	}
-	else
-	{
-		// создаём временный DC и рисуем в него зеркально отражённую копию
-		HDC hFlipDC = CreateCompatibleDC(hDC);
-		HBITMAP hFlipBitmap = CreateCompatibleBitmap(hDC, bm.bmWidth, bm.bmHeight);
-		HBITMAP hOldFlip = (HBITMAP)SelectObject(hFlipDC, hFlipBitmap);
+    while (!GetAsyncKeyState(VK_ESCAPE))
+    {
+        ShowRacketAndBall();//рисуем фон, ракетку и шарик
+        ShowScore();//рисуем очик и жизни
+        BitBlt(window.device_context, 0, 0, window.width, window.height, window.context, 0, 0, SRCCOPY);//копируем буфер в окно
+        Sleep(16);//ждем 16 милисекунд (1/количество кадров в секунду)
 
-		// StretchBlt поддерживает отрицательную ширину ИСТОЧНИКА — так и зеркалим
-		StretchBlt(
-			hFlipDC,
-			0, 0, bm.bmWidth, bm.bmHeight,
-			hMemDC,
-			bm.bmWidth - 1, 0, -bm.bmWidth, bm.bmHeight,
-			SRCCOPY
-		);
-
-		TransparentBlt(
-			window.contx,
-			x, y, x1, y1,
-			hFlipDC,
-			0, 0, bm.bmWidth, bm.bmHeight,
-			RGB(255, 0, 222)
-		);
-
-
-		SelectObject(hFlipDC, hOldFlip);
-		DeleteObject(hFlipBitmap);
-		DeleteDC(hFlipDC);
-	}
-
-	SelectObject(hMemDC, hOldbm);
-	DeleteDC(hMemDC);
-}
-
-HBITMAP CropBitmap(HBITMAP hSrcBitmap, int cropX, int cropY, int cropWidth, int cropHeight) {
-	// Получаем параметры исходного битмапа
-	BITMAP bm = {};
-	GetObject(hSrcBitmap, sizeof(BITMAP), &bm);
-
-	// Получаем контекст экрана по умолчанию
-	HDC hScreenDC = GetDC(NULL);
-
-	// Создаем контексты памяти для источника и назначения
-	HDC hSrcDC = CreateCompatibleDC(hScreenDC);
-	HDC hDstDC = CreateCompatibleDC(hScreenDC);
-
-	// Создаем новый пустой битмап для обрезанного изображения
-	HBITMAP hDstBitmap = CreateCompatibleBitmap(hScreenDC, cropWidth, cropHeight);
-
-	// Выбираем битмапы в контексты
-	HBITMAP hOldSrcBmp = (HBITMAP)SelectObject(hSrcDC, hSrcBitmap);
-	HBITMAP hOldDstBmp = (HBITMAP)SelectObject(hDstDC, hDstBitmap);
-
-	// Копируем нужный фрагмент
-	BitBlt(
-		hDstDC,        // Целевой DC
-		0, 0,          // Координаты X, Y вставки вцелом (верхний левый угол нового)
-		cropWidth,     // Ширина копируемой области
-		cropHeight,    // Высота копируемой области
-		hSrcDC,        // Исходный DC
-		cropX,         // Координата X источника, откуда режем
-		cropY,         // Координата Y источника, откуда режем
-		SRCCOPY        // Метод копирования
-	);
-
-	// Очистка и восстановление состояния
-	SelectObject(hSrcDC, hOldSrcBmp);
-	SelectObject(hDstDC, hOldDstBmp);
-
-	DeleteDC(hSrcDC);
-	DeleteDC(hDstDC);
-	ReleaseDC(NULL, hScreenDC);
-
-	return hDstBitmap; // Возвращает новый обрезанный HBITMAP (не забудьте удалить через DeleteObject)
-}
-
-//загрузка модулей приложения
-void InitApp()
-{
-	//создание и иниализация контекста устройсва и девайс устройства
-	window.dev_cont = GetDC(window.hWnd);
-	window.contx = CreateCompatibleDC(window.dev_cont);
-	SelectObject(window.contx, CreateCompatibleBitmap(window.dev_cont, window.width, window.height));
-
-	blocks.push_back({ 1100, 550, 100, 100 });
-	blocks.push_back({ 700, 750, 100, 100 });
-	blocks.push_back({ 500, 850, 150, 50 });
-
-	player.IdleFrames.push_back((HBITMAP)LoadImageA(NULL, "Player.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
-	player.WalkFrames.push_back((HBITMAP)LoadImageA(NULL, "PlayerWalk.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
-	player.ShootFrames.push_back((HBITMAP)LoadImageA(NULL, "PlayerShoot.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
-}
-
-
-//обновление приложения
-void UpdateApp()
-{
-	PlayerMovement();
-	Gravity();
-	CheckPlayerCollisions();
-	EnemyAttention();
-	EnemyGravity();
-	CheckEnemyCollisions();
-	BulletMovement();
-	CheckBulletCollisions();
-
-
-
-
-
-
-}
-
-//обработка команд устройств ввода
-void UpdateKeyCode()
-{
-	//выход из приложения на ESC
-	if (GetAsyncKeyState(VK_ESCAPE))
-	{
-		window.msg.message = WM_QUIT;
-	}
-}
-
-//обновление изображений
-void UpdateImage()
-{
-	BitBlt(window.dev_cont, 0, 0, window.width, window.height, window.contx, 0, 0, SRCCOPY);
-
-	// заднике
-	ShowBitmap(window.contx, 0, 0, window.width, window.height, (HBITMAP)LoadImageA(NULL, "back.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
-
-	// блоки
-	for (int i = 0; i < blocks.size(); i++)
-	{
-		ShowBitmap(window.contx,
-			blocks[i].x, blocks[i].y,
-			blocks[i].width, blocks[i].height,
-			(HBITMAP)LoadImageA(NULL, "block.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
-	}
-
-	// выбор кадра игрока по текущему состоянию
-	HBITMAP currentPlayerBitmap;
-
-	if (player.isShooting)
-		currentPlayerBitmap = player.ShootFrames[0];
-	else if (player.isWalking)
-		currentPlayerBitmap = player.WalkFrames[0];
-	else
-		currentPlayerBitmap = player.IdleFrames[0];
-
-	// отрисовка игрока
-	bool playerFlip = (player.facing == -1);
-	ShowBitmap(window.contx, player.PlayerX, player.PlayerY, player.PleyerWidth, player.PleyerHeight, currentPlayerBitmap, playerFlip);
-
-	HBITMAP tempH = CropBitmap((HBITMAP)LoadImageA(NULL, "coin.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE), player.currentFrame + player.frameTimer, 0, 62, 56);
-
-	ShowBitmap(window.contx, 100, 100, 62, 56, tempH);
-
-
-	// враг. рисуем только если жив
-	if (enemy.alive)
-	{
-		ShowBitmap(window.contx, enemy.x, enemy.y, enemy.Width, enemy.Height, (HBITMAP)LoadImageA(NULL, "Enemy.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE));
-	}
-
-	// пуля
-	if (bullet.create)
-	{
-		bool bulletFlip = (bullet.direction == -1);
-		ShowBitmap(window.contx, bullet.x, bullet.y, 100, 100, (HBITMAP)LoadImageA(NULL, "bullet.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE), bulletFlip);
-	}
-
-}
-
-
-//вход в программу
-int CALLBACK WinMain(
-	HINSTANCE hInstance,
-	HINSTANCE hPrevInstance,
-	LPSTR lpCmdLine,
-	int nShowCmd)
-{
-	InitWindow();
-	InitApp();
-
-	//основной цикл обновления приложения
-	while (window.gbool)
-	{
-		//обработка соощений для окна
-		while (PeekMessage(&window.msg, NULL, 0, 0, PM_REMOVE))
-		{
-			UpdateKeyCode();
-
-			//отбработка сообщений
-			if (window.msg.message == WM_QUIT)
-			{
-				window.gbool = false;
-				break;
-			}
-			TranslateMessage(&window.msg);
-			DispatchMessage(&window.msg);
-		}
-
-		UpdateImage();
-		UpdateApp();
-
-		//задержка обновления
-		Sleep(16);
-		player.frameTimer += 71;
-		if (player.frameTimer > 72 * 9)
-		{
-			player.frameTimer = 0;
-		}
-	}
-	return 0;
+        ProcessInput();//опрос клавиатуры
+        LimitRacket();//проверяем, чтобы ракетка не убежала за экран
+        ProcessBall();//перемещаем шарик
+        ProcessRoom();//обрабатываем отскоки от стен и каретки, попадание шарика в картетку
+    }
 }
