@@ -267,6 +267,40 @@ void ShowScore()
     SelectObject(window.context, hTmp);
     DeleteObject(hFont);
 }
+void StartCornerTest()
+{
+    // Убираем остальные блоки.
+    for (int i = 0; i < colomn; i++)
+    {
+        for (int b = 0; b < raw; b++)
+        {
+            block[i][b].iscreate = false;
+        }
+    }
+
+    // Один блок в центре окна.
+    block[0][0].iscreate = true;
+    block[0][0].width = 200;
+    block[0][0].height = 100;
+    block[0][0].x = window.width / 2.0f - 100.0f;
+    block[0][0].y = window.height / 2.0f - 50.0f;
+
+    float left = block[0][0].x;
+    float bottom = block[0][0].y + block[0][0].height;
+
+    // Шарик ниже и левее нижнего левого угла.
+    ball.rad = 20;
+    ball.x = left - 60;
+    ball.y = bottom + 60;
+
+    // Движение вверх-вправо, прямо к углу.
+    ball.dx = 0.5f;
+    ball.dy = -0.5f;
+    ball.speed = 4;
+
+    game.action = true;
+}
+
 
 void ProcessInput()
 {
@@ -278,6 +312,17 @@ void ProcessInput()
         game.action = true;
         ProcessSound("bounce.wav");
     }
+    static bool previousT = false;
+
+    bool currentT =
+        (GetAsyncKeyState('T') & 0x8000) != 0;
+
+    if (currentT && !previousT)
+    {
+        StartCornerTest();
+    }
+
+    previousT = currentT;
 }
 
 void ShowBitmap(HDC hDC, int x, int y, int x1, int y1, HBITMAP hBitmapBall, bool alpha = false)
